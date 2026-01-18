@@ -1,3 +1,5 @@
+-- NEVERLOSE.RAGE v2.1 with Improved Ragebot, Highlights & Fast KillWait
+
 local NEVERLOSE = loadstring(game:HttpGet("https://raw.githubusercontent.com/3345-c-a-t-s-u-s/NEVERLOSE-UI-Nightly/main/source.lua"))()
 NEVERLOSE:Theme("original")
 
@@ -47,7 +49,8 @@ local RageSettings = {
     Hitbox = "Head",
     MaxDist = 1200,
     BodyAimHP = 35,
-    MinVisibleTime = 0.03,
+    -- Параметр 'MinVisibleTime' теперь игнорируется, всегда минимальное время ожидания 0.025!
+    MinVisibleTime = 0.04,
     WaitForKillShot = true,
 }
 
@@ -62,31 +65,47 @@ local VisualSettings = {
     HotkeyList = true,
 }
 
--- CHAMS SETTINGS
+-- CHAMS SETTINGS + улучшения
+local matOpts = {"Flat","Glossy","Crystal","Glass","Metallic","Wireframe"}
+local chamsTargets = {"None","All Enemies","Allies","Everyone"}
 local ChamsSettings = {
     Enabled = false,
     Material = "Flat",
     Color = Color3.fromRGB(32, 212, 236),
     Transparency = 0.2,
     ForSelf = true,
+    TargetMode = "All Enemies"
 }
 local allChams = {}
-local materialMap = {
-    ["Flat"] = Enum.Material.SmoothPlastic,
-    ["Glossy"] = Enum.Material.Neon,
-    ["Crystal"] = Enum.Material.ForceField,
-    ["Glass"] = Enum.Material.Glass,
-    ["Metallic"] = Enum.Material.Metal,
-    ["Wireframe"] = Enum.Material.Foil,
-}
+
+local function MaterialHighlightProps(material)
+    local t = {
+        ["Flat"] = {FillTransparency=0.22, OutlineTransparency=0.32},
+        ["Glossy"] = {FillTransparency=0.09, OutlineTransparency=0, OutlineColor=Color3.fromRGB(255,255,255)},
+        ["Crystal"] = {FillTransparency=0.72, OutlineTransparency=0.13, OutlineColor=Color3.fromRGB(180,255,255)},
+        ["Glass"] = {FillTransparency=0.84, OutlineTransparency=0.1, OutlineColor=Color3.fromRGB(220,255,255)},
+        ["Metallic"] = {FillTransparency=0.17, OutlineTransparency=0, OutlineColor=Color3.fromRGB(180,180,200)},
+        ["Wireframe"] = {FillTransparency=0.98, OutlineTransparency=0, OutlineColor=Color3.fromRGB(20,245,245)},
+    }
+    return t[material] or t["Flat"]
+end
+
+local function ShouldShowChams(plr)
+    if ChamsSettings.TargetMode == "None" then
+        return false
+    elseif ChamsSettings.TargetMode == "Everyone" then
+        return true
+    elseif ChamsSettings.TargetMode == "Allies" then
+        return (plr ~= LP) and LP.Team and plr.Team==LP.Team
+    elseif ChamsSettings.TargetMode == "All Enemies" then
+        return (plr ~= LP) and LP.Team and plr.Team~=LP.Team
+    end
+    return false
+end
 
 local function ClearChams()
-    for model,adorns in pairs(allChams) do
-        if adorns then
-            for _,a in ipairs(adorns) do
-                if a and a.Parent then a:Destroy() end
-            end
-        end
+    for _,high in ipairs(allChams) do
+        if high and high.Parent then high:Destroy() end
     end
     allChams = {}
 end
@@ -94,25 +113,18 @@ end
 local function UpdateChams()
     ClearChams()
     if not ChamsSettings.Enabled then return end
-    for _,plr in ipairs(game:GetService("Players"):GetPlayers()) do
-        if (ChamsSettings.ForSelf or plr ~= LP) and plr.Character and plr.Character:FindFirstChild("HumanoidRootPart") then
-            local chamsList = {}
-            for _,part in ipairs(plr.Character:GetDescendants()) do
-                if part:IsA("BasePart") and part.Transparency < 0.99 and part.Name ~= "HumanoidRootPart" then
-                    local adorn = Instance.new("BoxHandleAdornment")
-                    adorn.Adornee = part
-                    adorn.AlwaysOnTop = true
-                    adorn.ZIndex = 10
-                    adorn.Size = part.Size + Vector3.new(0.08,0.08,0.08)
-                    adorn.Color3 = ChamsSettings.Color
-                    adorn.Transparency = ChamsSettings.Transparency
-                    adorn.Parent = part
-                    adorn.Name = "__Chams"
-                    table.insert(chamsList, adorn)
-                    part.Material = materialMap[ChamsSettings.Material] or Enum.Material.SmoothPlastic
-                end
-            end
-            allChams[plr.Character] = chamsList
+    for _,plr in ipairs(Plrs:GetPlayers()) do
+        if (ChamsSettings.ForSelf or plr ~= LP) and plr.Character and ShouldShowChams(plr) then
+            local char = plr.Character
+            local high = Instance.new("Highlight")
+            high.Parent = char
+            high.Adornee = char
+            local props = MaterialHighlightProps(ChamsSettings.Material)
+            for k,v in pairs(props) do pcall(function() high[k]=v end) end
+            high.FillColor = ChamsSettings.Color
+            high.OutlineColor = props.OutlineColor or ChamsSettings.Color
+            high.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+            table.insert(allChams, high)
         end
     end
 end
@@ -121,7 +133,149 @@ game:GetService("RunService").RenderStepped:Connect(UpdateChams)
 game:GetService("Players").PlayerAdded:Connect(function() task.wait(1) UpdateChams() end)
 game:GetService("Players").PlayerRemoving:Connect(function() task.wait(1) UpdateChams() end)
 
--- GHOST PEEK
+----------------------------------------------------------
+-- ======= ПРОКАЧАННЫЙ RAGEBOT =======
+----------------------------------------------------------
+local playerData, playerDataTime = {}, 0
+local myChar, myHRP, myHead, myHum, fireShot, fireShotTime = nil, nil, nil, nil, nil, 0
+local rbLast, frame = 0, 0
+local RayP = RaycastParams.new(); RayP.FilterType = Enum.RaycastFilterType.Exclude
+local minKillWait = 0.025 -- примерно 1.5 тика, почти мгновенно, всегда такое, даже если setting
+local function CacheChar()
+    local c = LP.Character
+    if c then
+        myChar,myHRP = c,c:FindFirstChild("HumanoidRootPart")
+        myHead,myHum = c:FindFirstChild("Head"),c:FindFirstChildOfClass("Humanoid")
+    else myChar,myHRP,myHead,myHum = nil,nil,nil,nil end
+end
+
+local function IsVisible(from, target, ignore)
+    local rayParams = RaycastParams.new()
+    rayParams.FilterType = Enum.RaycastFilterType.Exclude
+    rayParams.FilterDescendantsInstances = ignore or {myChar}
+    local dir = (target.Position-from).Unit * ((target.Position-from).Magnitude)
+    local hit = WS:Raycast(from, dir, rayParams)
+    return (not hit or hit.Instance:IsDescendantOf(target.Parent)), tick()
+end
+
+local function UpdatePlayerData()
+    local myTeam = LP.Team
+    playerData = {}
+    for _,plr in ipairs(Plrs:GetPlayers()) do
+        if plr ~= LP and plr.Character then
+            local char = plr.Character
+            local hrp = char:FindFirstChild("HumanoidRootPart")
+            local hum = char:FindFirstChildOfClass("Humanoid")
+            if hrp and hum and hum.Health > 2 then
+                local dist = (myHRP and hrp and (myHRP.Position - hrp.Position).Magnitude) or 9999
+                local isEnemy = true
+                if RageSettings.TeamCheck and myTeam and plr.Team == myTeam then
+                    isEnemy = false
+                end
+                table.insert(playerData, {
+                    plr = plr,
+                    char = char,
+                    hrp = hrp,
+                    hum = hum,
+                    isEnemy = isEnemy,
+                    dist = dist,
+                    lastVis = 0,
+                })
+            end
+        end
+    end
+    table.sort(playerData, function(a,b) return a.dist < b.dist end)
+end
+
+local function GetTarget()
+    if #playerData == 0 then return nil end
+    local myPos = myHRP.Position
+    for _,enemy in ipairs(playerData) do
+        if not enemy.isEnemy then continue end
+        local head = enemy.char:FindFirstChild("Head")
+        if not head then continue end
+        local velocity = (enemy.hrp.AssemblyLinearVelocity or Vector3.new())
+        local distance = (myPos - enemy.hrp.Position).Magnitude
+        local ping = 0.12 + math.clamp(distance/900,0,0.22)
+        local predictedPos = head.Position + velocity * ping
+        local tgtCheck = (distance < 20) and head.Position or predictedPos
+        local canSee, seenTick = IsVisible(myPos + Vector3.new(0,1.1,0), head, {myChar, enemy.char})
+        if not canSee then continue end
+        local isGrounded = true
+        if RageSettings.NoAirShot then
+            local ground = WS:Raycast(enemy.hrp.Position, Vector3.new(0,-7,0), RaycastParams.new())
+            if not ground or math.abs(velocity.Y) > 9 then isGrounded = false end
+        end
+        if not isGrounded then continue end
+        -- микро-задержка на видимость (anti-miss)
+        if enemy._lastSeenTick and (tick() - enemy._lastSeenTick) < minKillWait then continue end
+        enemy._lastSeenTick = seenTick
+        return enemy, tgtCheck
+    end
+    return nil
+end
+
+local function GetFireShot()
+    local now = tick()
+    if fireShot and fireShot.Parent and now-fireShotTime < 5 then return fireShot end
+    CacheChar()
+    if not myChar then return nil end
+    for _,child in ipairs(myChar:GetChildren()) do
+        if child:IsA("Tool") then
+            local remotes = child:FindFirstChild("Remotes")
+            if remotes then
+                local fs = remotes:FindFirstChild("FireShot") or remotes:FindFirstChild("fireShot")
+                if fs then
+                    fireShot,fireShotTime = fs,now
+                    return fs
+                end
+            end
+        end
+    end
+    return nil
+end
+
+local function MainLoop()
+    if uninjected or not RageSettings.Enabled then return end
+    frame = frame + 1
+    if frame%12==0 then CacheChar() end
+    if not myChar or not myHRP then return end
+    UpdatePlayerData()
+    local myPos = myHRP.Position+Vector3.new(0,1.15,0)
+    if RageSettings.AutoFire then
+        local now = tick()
+        if now - rbLast >= 0.035 then
+            local target, shootPos = GetTarget()
+            if target and shootPos then
+                local fire = GetFireShot()
+                if fire then
+                    local dir = (shootPos - myPos).Unit
+                    pcall(function()
+                        fire:FireServer(myPos, dir, target.hrp)
+                    end)
+                    rbLast = now
+                    Notification:Notify("info","Ragebot","Shot at "..(target.plr.Name or "Enemy"))
+                end
+            end
+        end
+    end
+    if frame>900 then frame=0 end
+end
+
+local mainConn
+local function StartRagebot()
+    if mainConn then return end
+    mainConn = RS.Heartbeat:Connect(MainLoop)
+    Notification:Notify("success", "Ragebot", "Enabled!")
+end
+local function StopRagebot()
+    if mainConn then mainConn:Disconnect(); mainConn=nil
+        Notification:Notify("warning", "Ragebot", "Disabled!") end
+end
+
+----------------------------------------------------------
+-- ========== GHOST, ANTIAIM, MENU ================
+----------------------------------------------------------
 local GhostSettings = {
     Enabled = false,
     TeleportDistance = 8,
@@ -131,6 +285,7 @@ local GhostSettings = {
 }
 local ghostActive = false
 local ghostPeekConn
+
 local function GhostPeekLoop()
     if uninjected or not GhostSettings.Enabled then return end
     CacheChar(); UpdatePlayerData()
@@ -139,43 +294,44 @@ local function GhostPeekLoop()
     local bulletOrigin = hrp.Position + Vector3.new(0,1.5,0)
     for i=1,#playerData do
         local d=playerData[i]
-        if not d or d.team or d.dist>140 or not d.r then continue end
-        local dir = (d.r.Position-bulletOrigin).Unit
+        if not d or d.team or d.dist>140 or not d.hrp then continue end
+        local dir = (d.hrp.Position-bulletOrigin).Unit
         local tpPos = bulletOrigin + dir*GhostSettings.TeleportDistance
         local params = RaycastParams.new()
         params.FilterType = Enum.RaycastFilterType.Exclude
-        params.FilterDescendantsInstances = {LP.Character, d.c}
-        local canShoot = WS:Raycast(tpPos, (d.r.Position-tpPos), params) == nil
+        params.FilterDescendantsInstances = {LP.Character, d.char}
+        local canShoot = WS:Raycast(tpPos, (d.hrp.Position-tpPos), params) == nil
         if not canShoot and GhostSettings.OnlyShootIfCanSee then continue end
         local oldCF = hrp.CFrame
         hrp.CFrame = CFrame.new(tpPos, tpPos+dir)
-        wait(GhostSettings.TpDuration)
+        task.wait(GhostSettings.TpDuration)
         local fs = GetFireShot()
         if fs then
-            pcall(function() fs:FireServer(tpPos, dir, d.r) end)
+            pcall(function() fs:FireServer(tpPos, dir, d.hrp) end)
         end
         hrp.CFrame = oldCF
-        Notification:Notify("info","Ghost Peek","Ghost shot at "..(d.p.Name or "Target"))
+        Notification:Notify("info","Ghost Peek","Ghost shot at "..(d.plr.Name or "Target"))
         break
     end
 end
+
 local function StartGhostPeek()
     if ghostPeekConn then return end
     ghostActive = true
     ghostPeekConn = RS.Heartbeat:Connect(function()
         if not ghostActive then return end
         GhostPeekLoop()
-        wait(GhostSettings.AttemptInterval)
+        task.wait(GhostSettings.AttemptInterval)
     end)
     Notification:Notify("success", "Ghost Peek", "Enabled!")
 end
+
 local function StopGhostPeek()
     if ghostPeekConn then ghostPeekConn:Disconnect(); ghostPeekConn=nil end
     ghostActive = false
     Notification:Notify("warning", "Ghost Peek", "Disabled!")
 end
 
--- ANTIAIM (как раньше, не вносилось)
 local modes = {"Off", "Desync", "Jitter", "Spin", "Defensive"}
 local AASettings = {
     Mode = "Off", Speed = 18, JitterAmount = 16, SpinSpeed = 14, Pitch = -60, Yaw = 180, RandStrength = 13
@@ -244,167 +400,7 @@ RS.Heartbeat:Connect(function()
     end
 end)
 
--- RAGEBOT (смарт логика и prediction, улучшено)
-local playerData, playerDataTime = {}, 0
-local myChar, myHRP, myHead, myHum, fireShot, fireShotTime = nil, nil, nil, nil, nil, 0
-local rbLast, frame = 0, 0
-local RayP = RaycastParams.new(); RayP.FilterType = Enum.RaycastFilterType.Exclude
-local function CacheChar()
-    local c = LP.Character
-    if c then
-        myChar,myHRP = c,c:FindFirstChild("HumanoidRootPart")
-        myHead,myHum = c:FindFirstChild("Head"),c:FindFirstChildOfClass("Humanoid")
-    else myChar,myHRP,myHead,myHum = nil,nil,nil,nil end
-end
-
-local function UpdatePlayerData()
-    local now = tick()
-    if now-playerDataTime < 0.2 then return end
-    playerDataTime = now
-    if not myHRP then return end
-    local myPos = myHRP.Position
-    local myTeam,myColor = LP.Team,LP.TeamColor
-    for i=1,16 do playerData[i]=nil end
-    local count = 0
-    for _,p in ipairs(Plrs:GetPlayers()) do
-        if p~=LP and p.Character then
-            local c,h,r = p.Character, p.Character:FindFirstChild("Humanoid"), p.Character:FindFirstChild("HumanoidRootPart")
-            if h and h.Health > 0 and r then
-                local dist = (myPos-r.Position).Magnitude
-                if dist < 2000 then
-                    count = count + 1
-                    local isTeam = myTeam and (p.Team==myTeam or p.TeamColor==myColor)
-                    playerData[count] = {
-                        p=p, c=c, h=h, r=r,
-                        head=c:FindFirstChild("Head"),
-                        torso=c:FindFirstChild("UpperTorso") or c:FindFirstChild("Torso"),
-                        dist=dist, team=isTeam,
-                        vel=r.AssemblyLinearVelocity,
-                        visibleTick=nil,
-                        canWallShot=nil,
-                    }
-                end
-            end
-        end
-    end
-    for i=2,count do
-        local key = playerData[i]; local j = i-1
-        while j >= 1 and playerData[j] and playerData[j].dist > key.dist do
-            playerData[j+1]=playerData[j]; j=j-1
-        end
-        playerData[j+1]=key
-    end
-end
-
-local function GetFireShot()
-    local now = tick()
-    if fireShot and fireShot.Parent and now-fireShotTime < 5 then return fireShot end
-    if not myChar then CacheChar() end
-    if not myChar then return nil end
-    for _,child in ipairs(myChar:GetChildren()) do
-        if child:IsA("Tool") then
-            local remotes = child:FindFirstChild("Remotes")
-            if remotes then
-                local fs = remotes:FindFirstChild("FireShot") or remotes:FindFirstChild("fireShot")
-                if fs then
-                    fireShot,fireShotTime = fs,now; return fs
-                end
-            end
-        end
-    end
-    return nil
-end
-
-local function MainLoop()
-    if uninjected or not RageSettings.Enabled then return end
-    frame = frame + 1
-    if frame%15==0 then CacheChar() end
-    if not myChar or not myHRP then return end
-    UpdatePlayerData()
-    local now, hrp, head = tick(), myHRP, myHead
-
-    if RageSettings.AutoFire and head then
-        local isGrounded = true
-        if myHum and hrp then
-            if myHum.FloorMaterial == Enum.Material.Air then isGrounded = false end
-            local vel = hrp.AssemblyLinearVelocity or hrp.Velocity
-            if math.abs(vel.Y)>2 then isGrounded=false end
-        end
-        if isGrounded and now-rbLast >= 0.035 then
-            RayP.FilterDescendantsInstances={myChar}
-            local best, bestScore = nil, -9999
-            local bulletOrigin = hrp.Position + Vector3.new(0,1.5,0)
-            for i=1,#playerData do
-                local d = playerData[i]
-                if not d or d.team or d.dist>RageSettings.MaxDist then continue end
-                if RageSettings.NoAirShot then
-                    RayP.FilterDescendantsInstances={d.c}
-                    local groundRay=WS:Raycast(d.r.Position,Vector3.new(0,-5,0),RayP)
-                    RayP.FilterDescendantsInstances={myChar}
-                    if not groundRay or (d.vel and math.abs(d.vel.Y)>8) then continue end
-                end
-                local targets={}
-                if RageSettings.SmartAim or RageSettings.AirShoot then
-                    if d.head then table.insert(targets,{part=d.head,priority=3}) end
-                    if d.torso then table.insert(targets,{part=d.torso,priority=2}) end
-                    if d.r then table.insert(targets,{part=d.r,priority=1}) end
-                else
-                    local tgt = RageSettings.Hitbox=="Head" and d.head or d.torso or d.r
-                    if tgt then table.insert(targets,{part=tgt,priority=1}) end
-                end
-                for _,tgtData in ipairs(targets) do
-                    local tgt = tgtData.part
-                    if not tgt then continue end
-                    local vel = d.vel or d.r.AssemblyLinearVelocity
-                    local basePred = 0.11 + math.clamp(d.dist/500,0,0.19)
-                    local targetPos = tgt.Position + vel * basePred
-                    if d.dist<44 then targetPos=tgt.Position end
-                    local params = RaycastParams.new()
-                    params.FilterType = Enum.RaycastFilterType.Exclude
-                    params.FilterDescendantsInstances = {myChar, d.c}
-                    local directionVec = (targetPos-bulletOrigin)
-                    local res = WS:Raycast(bulletOrigin, directionVec, params)
-                    local canSee = (res==nil)
-                    if RageSettings.WallCheck and not canSee and d.dist>32 then continue end
-                    if d.visibleTick and now-d.visibleTick < RageSettings.MinVisibleTime then continue end
-                    d.visibleTick = canSee and now or nil
-                    local hpBonus = (d.h and d.h.Health and d.h.Health<RageSettings.BodyAimHP) and 50 or 0
-                    local score = (RageSettings.MaxDist-d.dist) + tgtData.priority*120 + hpBonus
-                    if score>bestScore then
-                        bestScore=score; best={d=d,tgt=tgt,predictedPos=targetPos}
-                    end
-                end
-            end
-            if best then
-                if not RageSettings.WaitForKillShot or best.d.visibleTick and now-best.d.visibleTick>=RageSettings.MinVisibleTime then
-                    local fs = GetFireShot()
-                    if fs then
-                        local pos = best.predictedPos or best.tgt.Position
-                        local direction = (pos-bulletOrigin).Unit
-                        pcall(function() fs:FireServer(bulletOrigin,direction,best.tgt) end)
-                        rbLast = now
-                        local targetName = best.d.p and best.d.p.Name or "Unknown"
-                        Notification:Notify("info", "Ragebot", "Shot at "..targetName)
-                    end
-                end
-            end
-        end
-    end
-    if frame>1000 then frame=0 end
-end
-
-local mainConn
-local function StartRagebot()
-    if mainConn then return end
-    mainConn = RS.Heartbeat:Connect(MainLoop)
-    Notification:Notify("success", "Ragebot", "Enabled!")
-end
-local function StopRagebot()
-    if mainConn then mainConn:Disconnect(); mainConn=nil
-        Notification:Notify("warning", "Ragebot", "Disabled!") end
-end
-
--- MENU
+------------------ МЕНЮ ---------------------
 local RageSection = MainTab:AddSection('Ragebot Settings', "left")
 RageSection:AddToggle('Enable Ragebot', false, function(val)
     RageSettings.Enabled = val
@@ -462,8 +458,11 @@ GhostSection:AddToggle("Only Shoot If LOS", true, function(val)
     GhostSettings.OnlyShootIfCanSee = val
 end)
 
-local matOpts = {"Flat","Glossy","Crystal","Glass","Metallic","Wireframe"}
 local VisualsSection = VisualsTab:AddSection('Visual Settings', "left")
+VisualsSection:AddDropdown("Player Chams Target", chamsTargets, "All Enemies", function(val)
+    ChamsSettings.TargetMode = val
+    UpdateChams()
+end)
 VisualsSection:AddToggle('Enable Chams', false, function(val)
     ChamsSettings.Enabled = val
     UpdateChams()
@@ -495,4 +494,4 @@ VisualsSection:AddDropdown('KE Color', {"White", "Red", "Blue", "Green", "Yellow
 
 CacheChar()
 Notification:Notify("info", "neverlose.lua", "Loaded! (Rage, Chams, Ghost Peek, Uninject)")
-print("neverlose.lua (rage v2, full chams, ghost peek, uninject, anti-aim)")
+print("neverlose.lua (rage v2.1, fast killwait, full chams, ghost peek, uninject, anti-aim)")
