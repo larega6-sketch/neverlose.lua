@@ -66,6 +66,12 @@ createHitlogUI()
 local function showHitlog(hitType, info)
     if not HITLOG_ENABLED then return end
     if not hitlogContainer then return end
+
+    -- Скрываем MISS no target
+    if hitType == "Miss" and info and info.reason == "no_target" then
+        return
+    end
+
     hitlogOrder = hitlogOrder + 1
     local textLabel = Instance.new("TextLabel")
     textLabel.Name = "Hitlog_" .. hitlogOrder
@@ -96,8 +102,6 @@ local function showHitlog(hitType, info)
             textLabel.Text = string.format("MISS | TOO FAR | %d studs", tonumber(info.distance) or 0)
         elseif reason == "bad_angle" then
             textLabel.Text = string.format("MISS | ANGLE | %d°", tonumber(info.angle) or 0)
-        elseif reason == "no_target" then
-            textLabel.Text = "MISS | NO TARGET"
         elseif reason == "target_dead" then
             textLabel.Text = "MISS | DEAD"
         elseif reason == "friendly_fire" then
@@ -287,11 +291,7 @@ local function MainLoop()
                         damage = math.random(18,52), -- если можно получить дамаг real — заменить!
                         distance = target.dist or 0
                     })
-                else
-                    showHitlog("Miss", {reason="no_target"})
                 end
-            else
-                showHitlog("Miss", {reason="no_target"})
             end
         end
     end
