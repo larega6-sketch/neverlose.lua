@@ -1,4 +1,5 @@
 -- NEVERLOSE.RAGE v2.1 with Improved Ragebot, Highlights & Fast KillWait
+-- Edited: Full Uninject, Menu removal, 2.5s cooldown, simplified Ragebot target
 
 local NEVERLOSE = loadstring(game:HttpGet("https://raw.githubusercontent.com/3345-c-a-t-s-u-s/NEVERLOSE-UI-Nightly/main/source.lua"))()
 NEVERLOSE:Theme("original")
@@ -18,23 +19,38 @@ local WS = game:GetService("Workspace")
 local RS = game:GetService("RunService")
 local LP = Plrs.LocalPlayer
 
--- UNINJECT SYSTEM
+-- === Полный UNINJECT SYSTEM ===
 local uninjected = false
-local function UninjectAll()
-    if mainConn then mainConn:Disconnect() mainConn=nil end
-    if ghostPeekConn then ghostPeekConn:Disconnect() ghostPeekConn=nil end
-    Notification:Notify("warning", "neverlose.lua", "Script Uninjected!")
-    Window:Close()
-    for i,v in pairs(getconnections(RS.Heartbeat)) do
-        if v.Function and debug.getinfo(v.Function).source:find("neverlose.lua") then
-            v:Disconnect()
-        end
+local mainConn, ghostPeekConn
+
+local function ClearChams()
+    for _,high in ipairs(allChams or {}) do
+        if high and high.Parent then pcall(function() high:Destroy() end) end
     end
-    uninjected = true
+    allChams = {}
 end
+
+local function FullUninject()
+    uninjected = true
+    -- Отписать все conn
+    if mainConn then pcall(function() mainConn:Disconnect() end) mainConn=nil end
+    if ghostPeekConn then pcall(function() ghostPeekConn:Disconnect() end) ghostPeekConn=nil end
+    -- Вырубить все основные настройки
+    RageSettings.Enabled = false
+    GhostSettings.Enabled = false
+    AASettings.Mode = "Off"
+    -- Чистим все чамсы
+    ClearChams()
+    -- Удалить меню
+    pcall(function() if NEVERLOSE and NEVERLOSE.Destroy then NEVERLOSE:Destroy() end end)
+    pcall(function() if Window and Window.Destroy then Window:Destroy() end end)
+    -- Сообщение
+    Notification:Notify("warning", "neverlose.lua", "Script Fully Uninjected! All UI and features removed.")
+end
+
 local UninjectSection = MainTab:AddSection('Uninject', "right")
 UninjectSection:AddButton("Uninject Script", function()
-    UninjectAll()
+    FullUninject()
 end)
 
 -- Ragebot settings
@@ -43,16 +59,16 @@ local RageSettings = {
     AutoFire = true,
     TeamCheck = true,
     WallCheck = true,
-    NoAirShot = true,
-    SmartAim = true,
-    AirShoot = false,
+    NoAirShot = true,    -- Не используется после упрощения
+    SmartAim = true,     -- Не используется после упрощения
+    AirShoot = false,    -- Не используется после упрощения
     Hitbox = "Head",
     MaxDist = 1200,
     BodyAimHP = 35,
-    -- Параметр 'MinVisibleTime' теперь игнорируется, всегда минимальное время ожидания 0.025!
-    MinVisibleTime = 0.04,
-    WaitForKillShot = true,
+    -- WaitForKillShot удалено!
+    -- MinVisibleTime удалено!
 }
+local rage_cooldown = 2.5 -- секунды между выстрелами
 
 local VisualSettings = {
     HitLogger = true,
@@ -65,7 +81,6 @@ local VisualSettings = {
     HotkeyList = true,
 }
 
--- CHAMS SETTINGS + улучшения
 local matOpts = {"Flat","Glossy","Crystal","Glass","Metallic","Wireframe"}
 local chamsTargets = {"None","All Enemies","Allies","Everyone"}
 local ChamsSettings = {
@@ -103,13 +118,6 @@ local function ShouldShowChams(plr)
     return false
 end
 
-local function ClearChams()
-    for _,high in ipairs(allChams) do
-        if high and high.Parent then high:Destroy() end
-    end
-    allChams = {}
-end
-
 local function UpdateChams()
     ClearChams()
     if not ChamsSettings.Enabled then return end
@@ -134,28 +142,18 @@ game:GetService("Players").PlayerAdded:Connect(function() task.wait(1) UpdateCha
 game:GetService("Players").PlayerRemoving:Connect(function() task.wait(1) UpdateChams() end)
 
 ----------------------------------------------------------
--- ======= ПРОКАЧАННЫЙ RAGEBOT =======
+-- ========== Упрощённый RAGEBOT ==========
 ----------------------------------------------------------
 local playerData, playerDataTime = {}, 0
 local myChar, myHRP, myHead, myHum, fireShot, fireShotTime = nil, nil, nil, nil, nil, 0
 local rbLast, frame = 0, 0
-local RayP = RaycastParams.new(); RayP.FilterType = Enum.RaycastFilterType.Exclude
-local minKillWait = 0.025 -- примерно 1.5 тика, почти мгновенно, всегда такое, даже если setting
+
 local function CacheChar()
     local c = LP.Character
     if c then
         myChar,myHRP = c,c:FindFirstChild("HumanoidRootPart")
         myHead,myHum = c:FindFirstChild("Head"),c:FindFirstChildOfClass("Humanoid")
     else myChar,myHRP,myHead,myHum = nil,nil,nil,nil end
-end
-
-local function IsVisible(from, target, ignore)
-    local rayParams = RaycastParams.new()
-    rayParams.FilterType = Enum.RaycastFilterType.Exclude
-    rayParams.FilterDescendantsInstances = ignore or {myChar}
-    local dir = (target.Position-from).Unit * ((target.Position-from).Magnitude)
-    local hit = WS:Raycast(from, dir, rayParams)
-    return (not hit or hit.Instance:IsDescendantOf(target.Parent)), tick()
 end
 
 local function UpdatePlayerData()
@@ -179,7 +177,6 @@ local function UpdatePlayerData()
                     hum = hum,
                     isEnemy = isEnemy,
                     dist = dist,
-                    lastVis = 0,
                 })
             end
         end
@@ -189,28 +186,21 @@ end
 
 local function GetTarget()
     if #playerData == 0 then return nil end
-    local myPos = myHRP.Position
     for _,enemy in ipairs(playerData) do
         if not enemy.isEnemy then continue end
-        local head = enemy.char:FindFirstChild("Head")
-        if not head then continue end
-        local velocity = (enemy.hrp.AssemblyLinearVelocity or Vector3.new())
-        local distance = (myPos - enemy.hrp.Position).Magnitude
-        local ping = 0.12 + math.clamp(distance/900,0,0.22)
-        local predictedPos = head.Position + velocity * ping
-        local tgtCheck = (distance < 20) and head.Position or predictedPos
-        local canSee, seenTick = IsVisible(myPos + Vector3.new(0,1.1,0), head, {myChar, enemy.char})
-        if not canSee then continue end
-        local isGrounded = true
-        if RageSettings.NoAirShot then
-            local ground = WS:Raycast(enemy.hrp.Position, Vector3.new(0,-7,0), RaycastParams.new())
-            if not ground or math.abs(velocity.Y) > 9 then isGrounded = false end
+        local part = enemy.char:FindFirstChild(RageSettings.Hitbox or "Head")
+        if not part then continue end
+        if (enemy.dist or 9999) > (RageSettings.MaxDist or 1200) then continue end
+        local canSee = true
+        if RageSettings.WallCheck then
+            local params = RaycastParams.new()
+            params.FilterType = Enum.RaycastFilterType.Exclude
+            params.FilterDescendantsInstances = {myChar, enemy.char}
+            local hit = WS:Raycast(myHRP.Position + Vector3.new(0,1,0), (part.Position-myHRP.Position), params)
+            canSee = not hit or hit.Instance:IsDescendantOf(enemy.char)
         end
-        if not isGrounded then continue end
-        -- микро-задержка на видимость (anti-miss)
-        if enemy._lastSeenTick and (tick() - enemy._lastSeenTick) < minKillWait then continue end
-        enemy._lastSeenTick = seenTick
-        return enemy, tgtCheck
+        if not canSee then continue end
+        return enemy, part.Position
     end
     return nil
 end
@@ -244,7 +234,7 @@ local function MainLoop()
     local myPos = myHRP.Position+Vector3.new(0,1.15,0)
     if RageSettings.AutoFire then
         local now = tick()
-        if now - rbLast >= 0.035 then
+        if now - rbLast >= rage_cooldown then
             local target, shootPos = GetTarget()
             if target and shootPos then
                 local fire = GetFireShot()
@@ -262,19 +252,18 @@ local function MainLoop()
     if frame>900 then frame=0 end
 end
 
-local mainConn
 local function StartRagebot()
     if mainConn then return end
     mainConn = RS.Heartbeat:Connect(MainLoop)
     Notification:Notify("success", "Ragebot", "Enabled!")
 end
 local function StopRagebot()
-    if mainConn then mainConn:Disconnect(); mainConn=nil
-        Notification:Notify("warning", "Ragebot", "Disabled!") end
+    if mainConn then mainConn:Disconnect(); mainConn=nil end
+    Notification:Notify("warning", "Ragebot", "Disabled!")
 end
 
 ----------------------------------------------------------
--- ========== GHOST, ANTIAIM, MENU ================
+-- ========== GHOST, ANTIAIM, МЕНЮ ================
 ----------------------------------------------------------
 local GhostSettings = {
     Enabled = false,
@@ -284,7 +273,6 @@ local GhostSettings = {
     OnlyShootIfCanSee = true,
 }
 local ghostActive = false
-local ghostPeekConn
 
 local function GhostPeekLoop()
     if uninjected or not GhostSettings.Enabled then return end
@@ -349,6 +337,7 @@ local function setHeadDown(char, deg)
     end
 end
 RS.Heartbeat:Connect(function()
+    if uninjected then return end
     if AASettings.Mode == "Off" then return end
     local char = LP.Character
     if not char then return end
@@ -415,15 +404,6 @@ end)
 RageSection:AddToggle('Wall Check', true, function(val)
     RageSettings.WallCheck = val
 end)
-RageSection:AddToggle('No Air Shot', true, function(val)
-    RageSettings.NoAirShot = val
-end)
-RageSection:AddToggle('Smart Aim', true, function(val)
-    RageSettings.SmartAim = val
-end)
-RageSection:AddToggle('Air Shoot', false, function(val)
-    RageSettings.AirShoot = val
-end)
 RageSection:AddDropdown('Hitbox', {"Head", "Torso", "Body"}, "Head", function(val)
     RageSettings.Hitbox = val
 end)
@@ -432,12 +412,6 @@ RageSection:AddSlider('Max Distance', 50, 1800, 1200, function(val)
 end)
 RageSection:AddSlider('Body Aim HP', 10, 100, 35, function(val)
     RageSettings.BodyAimHP = val
-end)
-RageSection:AddSlider('Min Visible Time', 0.01, 0.2, 0.04, function(val)
-    RageSettings.MinVisibleTime = val
-end)
-RageSection:AddToggle('Wait Kill Shot', true, function(val)
-    RageSettings.WaitForKillShot = val
 end)
 
 local GhostSection = GhostTab:AddSection("Ghost Peek", "left")
