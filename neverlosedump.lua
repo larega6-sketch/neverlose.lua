@@ -1,13 +1,14 @@
 local NEVERLOSE = loadstring(game:HttpGet("https://raw.githubusercontent.com/3345-c-a-t-s-u-s/NEVERLOSE-UI-Nightly/main/source.lua"))()
-NEVERLOSE:Theme("nightly")
+NEVERLOSE:Theme("original")
 
-local Window = NEVERLOSE:AddWindow("NEVERLOSE", "Arcanum Ragebot")
+local Window = NEVERLOSE:AddWindow("NEVERLOSE", "dev:zxcsavaq")
 local Notification = NEVERLOSE:Notification()
 Notification.MaxNotifications = 6
 Window:AddTabLabel('Home')
 
 local MainTab = Window:AddTab('Ragebot', 'mouse')
 local VisualsTab = Window:AddTab('Visuals', 'earth')
+local AntiAimTab = Window:AddTab('AntiAim', 'users')
 
 local Plrs = game:GetService("Players")
 local WS = game:GetService("Workspace")
@@ -37,50 +38,127 @@ local VisualSettings = {
     KillEffectColor = "White",
     TimeDisplay = true,
     HotkeyList = true,
-    DesyncAntiAim = false,
 }
 
--- ========= DESYNC ANTI-AIM =========
-local desyncEnabled = false
-local HRP_OFFSET = 22
-local LAG_T = 0.15
-local returnTime = 0.06
-local jitterYaw = 170
-local savedServerCFrame = nil
-local stage = 0
+------------------------------------
+-- AntiAim SETTINGS & MENU --
+local AASettings = {
+    Mode = "Off",       -- Off, Desync, Jitter, Spin, Defensive
+    Speed = 18,         -- Для Desync/Jitter: амплитуда
+    JitterAmount = 16,  -- Для Jitter: сила тряски
+    SpinSpeed = 14,     -- Для Spin: скорость вращения
+    Pitch = -60,        -- Наклон головы вниз
+    Yaw = 180,          -- Для всех
+    RandStrength = 13,  -- Defensive
+}
+
+local modes = {"Off", "Desync", "Jitter", "Spin", "Defensive"}
+
+local AntiAimSection = AntiAimTab:AddSection("AntiAim Modes", "left")
+AntiAimSection:AddDropdown("AA Mode", modes, "Off", function(val)
+    AASettings.Mode = val
+    Notification:Notify("info", "AntiAim", "Режим: "..val)
+end)
+AntiAimSection:AddSlider("AA Speed", 5, 30, 18, function(val)
+    AASettings.Speed = val
+end)
+AntiAimSection:AddSlider("Jitter Amount", 5, 40, 16, function(val)
+    AASettings.JitterAmount = val
+end)
+AntiAimSection:AddSlider("Spin Speed", 1, 50, 14, function(val)
+    AASettings.SpinSpeed = val
+end)
+AntiAimSection:AddSlider("Pitch", -89, 0, -60, function(val)
+    AASettings.Pitch = val
+end)
+AntiAimSection:AddSlider("Yaw", 0, 360, 180, function(val)
+    AASettings.Yaw = val
+end)
+AntiAimSection:AddSlider("Defensive Strength", 5, 45, 13, function(val)
+    AASettings.RandStrength = val
+end)
+
+------------------------------
+-- AntiAim LOGIC: Head+Torso Down, Desync, Jitter, Spin, Defensive
+------------------------------
+local lastAAStage = 0
+local spinAngle = 0
+local lastServerCF = nil
 local lastSwitch = tick()
+local function setHeadDown(char, deg)
+    local head = char:FindFirstChild("Head")
+    if head then
+        local pos = head.Position
+        head.CFrame = CFrame.new(pos) * CFrame.Angles(math.rad(deg),0,0)
+    end
+    local torso = char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso")
+    if torso then
+        torso.CFrame = torso.CFrame * CFrame.Angles(math.rad(deg * 0.15), 0, 0)
+    end
+end
 
 RS.Heartbeat:Connect(function()
-    if not desyncEnabled then return end
+    if AASettings.Mode == "Off" then return end
     local char = LP.Character
     if not char then return end
     local hrp = char:FindFirstChild("HumanoidRootPart")
     if not hrp then return end
 
-    local t = tick()
-    if stage == 0 then
-        savedServerCFrame = hrp.CFrame
-        local randomVec = Vector3.new(
-            math.random(-HRP_OFFSET,HRP_OFFSET),
-            0,
-            math.random(-HRP_OFFSET,HRP_OFFSET)
-        )
-        local randomYaw = math.rad(math.random(-jitterYaw, jitterYaw))
-        hrp.CFrame = hrp.CFrame * CFrame.new(randomVec) * CFrame.Angles(0, randomYaw, 0)
-        lastSwitch = t
-        stage = 1
-    elseif stage == 1 and t - lastSwitch > returnTime then
-        if savedServerCFrame then
-            hrp.CFrame = savedServerCFrame
+    -- Голова всегда наклонена вниз
+    setHeadDown(char, AASettings.Pitch)
+
+    if AASettings.Mode == "Desync" then
+        local t = tick()
+        if lastAAStage == 0 then
+            lastServerCF = hrp.CFrame
+            local offset = Vector3.new(
+                math.random(-AASettings.Speed, AASettings.Speed),
+                0,
+                math.random(-AASettings.Speed, AASettings.Speed)
+            )
+            local randomYaw = math.rad(math.random(-AASettings.Yaw, AASettings.Yaw))
+            hrp.CFrame = hrp.CFrame * CFrame.new(offset) * CFrame.Angles(0, randomYaw, 0)
+            lastSwitch = t
+            lastAAStage = 1
+        elseif lastAAStage == 1 and t - lastSwitch > 0.08 then
+            if lastServerCF then hrp.CFrame = lastServerCF end
+            lastSwitch = t
+            lastAAStage = 2
+        elseif lastAAStage == 2 and t - lastSwitch > 0.12 then
+            lastAAStage = 0
         end
-        lastSwitch = t
-        stage = 2
-    elseif stage == 2 and t - lastSwitch > LAG_T then
-        stage = 0
+
+    elseif AASettings.Mode == "Jitter" then
+        -- Jitter: резкая непредсказуемая тряска по x/y/z + yaw
+        local offset = Vector3.new(
+            math.random(-AASettings.JitterAmount, AASettings.JitterAmount),
+            math.random(-AASettings.JitterAmount//2, AASettings.JitterAmount//2),
+            math.random(-AASettings.JitterAmount, AASettings.JitterAmount)
+        )
+        local jitterYaw = math.rad(math.random(-AASettings.Yaw, AASettings.Yaw))
+        hrp.CFrame = hrp.CFrame * CFrame.Angles(0, jitterYaw, 0) * CFrame.new(offset)
+        lastServerCF = hrp.CFrame
+
+    elseif AASettings.Mode == "Spin" then
+        -- Spin: постоянное вращение по yaw (без jitter)
+        spinAngle = (spinAngle + AASettings.SpinSpeed)%360
+        hrp.CFrame = hrp.CFrame * CFrame.Angles(0, math.rad(spinAngle), 0)
+        lastServerCF = hrp.CFrame
+
+    elseif AASettings.Mode == "Defensive" then
+        local jumpOffset = Vector3.new(
+            math.random(-AASettings.RandStrength, AASettings.RandStrength),
+            math.random(2,7),
+            math.random(-AASettings.RandStrength, AASettings.RandStrength)
+        )
+        local randomYaw = math.rad(math.random(-AASettings.Yaw, AASettings.Yaw))
+        hrp.CFrame = hrp.CFrame * CFrame.Angles(0, randomYaw, 0) * CFrame.new(jumpOffset)
+        lastServerCF = hrp.CFrame
     end
 end)
 
--- ========== SYSTEM VARIABLES ==========
+------------------------------------
+-- Ragebot (без изменений, прежний)
 local playerData = {}
 local playerDataTime = 0
 local PLAYER_CACHE_INTERVAL = 0.2
@@ -271,7 +349,6 @@ local function StopRagebot()
 end
 
 -- MENU
-
 local RageSection = MainTab:AddSection('Ragebot Settings', "left")
 RageSection:AddToggle('Enable Ragebot', false, function(val)
     RageSettings.Enabled = val
@@ -335,12 +412,6 @@ VisualsSection:AddDropdown('KE Color', {"White", "Red", "Blue", "Green", "Yellow
     VisualSettings.KillEffectColor = val
 end)
 
-VisualsSection:AddToggle('Desync AntiAim', false, function(val)
-    desyncEnabled = val
-    VisualSettings.DesyncAntiAim = val
-    Notification:Notify("info", "AntiAim", val and "Desync антиаим включён!" or "Desync антиаим выключен!")
-end)
-
 CacheChar()
-Notification:Notify("info", "Arcanum Ragebot", "Loaded successfully!")
-print("Arcanum Ragebot (night mode, desync anti-aim, improved rage)")
+Notification:Notify("info", "neverlose.lua", "Loaded beta")
+print("Arcanum Ragebot (night mode, separate Jitter/Spin anti-aims & configurable menu)")
