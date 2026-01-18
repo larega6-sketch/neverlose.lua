@@ -1,6 +1,4 @@
 local NEVERLOSE = loadstring(game:HttpGet("https://raw.githubusercontent.com/3345-c-a-t-s-u-s/NEVERLOSE-UI-Nightly/main/source.lua"))()
-
--- Night mode
 NEVERLOSE:Theme("nightly")
 
 local Window = NEVERLOSE:AddWindow("NEVERLOSE", "Arcanum Ragebot")
@@ -11,7 +9,6 @@ Window:AddTabLabel('Home')
 local MainTab = Window:AddTab('Ragebot', 'mouse')
 local VisualsTab = Window:AddTab('Visuals', 'earth')
 
--- SYSTEM VARIABLES
 local Plrs = game:GetService("Players")
 local WS = game:GetService("Workspace")
 local RS = game:GetService("RunService")
@@ -31,7 +28,6 @@ local RageSettings = {
     BodyAimHP = 50,
 }
 
--- Visual settings (only working options)
 local VisualSettings = {
     HitLogger = true,
     MaxLogs = 8,
@@ -41,8 +37,50 @@ local VisualSettings = {
     KillEffectColor = "White",
     TimeDisplay = true,
     HotkeyList = true,
+    DesyncAntiAim = false,
 }
 
+-- ========= DESYNC ANTI-AIM =========
+local desyncEnabled = false
+local HRP_OFFSET = 22
+local LAG_T = 0.15
+local returnTime = 0.06
+local jitterYaw = 170
+local savedServerCFrame = nil
+local stage = 0
+local lastSwitch = tick()
+
+RS.Heartbeat:Connect(function()
+    if not desyncEnabled then return end
+    local char = LP.Character
+    if not char then return end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+
+    local t = tick()
+    if stage == 0 then
+        savedServerCFrame = hrp.CFrame
+        local randomVec = Vector3.new(
+            math.random(-HRP_OFFSET,HRP_OFFSET),
+            0,
+            math.random(-HRP_OFFSET,HRP_OFFSET)
+        )
+        local randomYaw = math.rad(math.random(-jitterYaw, jitterYaw))
+        hrp.CFrame = hrp.CFrame * CFrame.new(randomVec) * CFrame.Angles(0, randomYaw, 0)
+        lastSwitch = t
+        stage = 1
+    elseif stage == 1 and t - lastSwitch > returnTime then
+        if savedServerCFrame then
+            hrp.CFrame = savedServerCFrame
+        end
+        lastSwitch = t
+        stage = 2
+    elseif stage == 2 and t - lastSwitch > LAG_T then
+        stage = 0
+    end
+end)
+
+-- ========== SYSTEM VARIABLES ==========
 local playerData = {}
 local playerDataTime = 0
 local PLAYER_CACHE_INTERVAL = 0.2
@@ -100,7 +138,6 @@ local function UpdatePlayerData()
         end
     end
 
-    -- By distance
     for i = 2, count do
         local key = playerData[i]
         local j = i - 1
@@ -132,7 +169,6 @@ local function GetFireShot()
     return nil
 end
 
--- MAIN RAGEBOT LOOP (upgraded target selection, no break)
 local function MainLoop()
     if not RageSettings.Enabled then return end
     frame = frame + 1
@@ -150,7 +186,7 @@ local function MainLoop()
             local vel = hrp.AssemblyLinearVelocity or hrp.Velocity
             if math.abs(vel.Y) > 2 then isGrounded = false end
         end
-        if isGrounded and now - rbLast >= 0.13 then
+        if isGrounded and now - rbLast >= 0.04 then
             RayP.FilterDescendantsInstances = {myChar}
             local best = nil
             local bestScore = -9999
@@ -161,17 +197,17 @@ local function MainLoop()
                     if RageSettings.NoAirShot then
                         local enemyPos = d.r.Position
                         RayP.FilterDescendantsInstances = {d.c}
-                        local groundRay = WS:Raycast(enemyPos, Vector3.new(0, -4, 0), RayP)
+                        local groundRay = WS:Raycast(enemyPos, Vector3.new(0,-4,0), RayP)
                         local isInAir = groundRay == nil
                         local enemyVelY = d.vel and d.vel.Y or 0
                         if isInAir or math.abs(enemyVelY) > 8 then RayP.FilterDescendantsInstances = {myChar} continue end
                         RayP.FilterDescendantsInstances = {myChar}
                     end
                     local targets = {}
-                    if RageSettings.AirShoot or RageSettings.SmartAim then
+                    if RageSettings.SmartAim or RageSettings.AirShoot then
                         if d.head then table.insert(targets, {part = d.head, priority = 3}) end
                         if d.torso then table.insert(targets, {part = d.torso, priority = 2}) end
-                        table.insert(targets, {part = d.r, priority = 1})
+                        if d.r then table.insert(targets, {part = d.r, priority = 1}) end
                     else
                         local tgt = RageSettings.Hitbox == "Head" and d.head or d.torso or d.r
                         if tgt then table.insert(targets, {part = tgt, priority = 1}) end
@@ -180,16 +216,21 @@ local function MainLoop()
                         local tgt = tgtData.part
                         if not tgt then continue end
                         local vel = d.vel or d.r.AssemblyLinearVelocity
-                        local realPos = tgt.Position
-                        local targetPos = realPos + vel * 0.08 -- short prediction
+                        local recentVel = vel
+                        local isPeeking = math.abs(recentVel.X) > 12 or math.abs(recentVel.Z) > 12
+                        local peekPred = isPeeking and 0.12 or 0.07
+                        local targetPos = tgt.Position + vel * peekPred
+                        if d.dist < 35 then
+                            targetPos = tgt.Position
+                        end
                         local params = RaycastParams.new()
                         params.FilterType = Enum.RaycastFilterType.Exclude
                         params.FilterDescendantsInstances = {myChar, d.c}
                         local directionVec = targetPos - bulletOrigin
                         local res = WS:Raycast(bulletOrigin, directionVec, params)
                         local canSee = (res == nil)
-                        if RageSettings.WallCheck and not canSee then continue end
-                        local score = (RageSettings.MaxDist - d.dist) + tgtData.priority * 100
+                        if RageSettings.WallCheck and not canSee and d.dist > 35 then continue end
+                        local score = (RageSettings.MaxDist - d.dist) + tgtData.priority * 100 + (isPeeking and 80 or 0)
                         if score > bestScore then
                             bestScore = score
                             best = {d = d, tgt = tgt, predictedPos = targetPos}
@@ -215,7 +256,6 @@ local function MainLoop()
     if frame > 1000 then frame = 0 end
 end
 
--- ENABLE & DISABLE RAGEBOT
 local mainConn
 local function StartRagebot()
     if mainConn then return end
@@ -231,6 +271,7 @@ local function StopRagebot()
 end
 
 -- MENU
+
 local RageSection = MainTab:AddSection('Ragebot Settings', "left")
 RageSection:AddToggle('Enable Ragebot', false, function(val)
     RageSettings.Enabled = val
@@ -294,7 +335,12 @@ VisualsSection:AddDropdown('KE Color', {"White", "Red", "Blue", "Green", "Yellow
     VisualSettings.KillEffectColor = val
 end)
 
--- run
+VisualsSection:AddToggle('Desync AntiAim', false, function(val)
+    desyncEnabled = val
+    VisualSettings.DesyncAntiAim = val
+    Notification:Notify("info", "AntiAim", val and "Desync антиаим включён!" or "Desync антиаим выключен!")
+end)
+
 CacheChar()
 Notification:Notify("info", "Arcanum Ragebot", "Loaded successfully!")
-print("Arcanum Ragebot (night mode, cleaned visuals, rage target selection improved)")
+print("Arcanum Ragebot (night mode, desync anti-aim, improved rage)")
