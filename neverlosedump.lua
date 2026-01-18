@@ -1,7 +1,7 @@
 -- NEVERLOSE.RAGE (2026 IMPROVED) | Ragebot, Self Chams, ESP, Center Hitlogs, UX & Safe AntiAim
 local DEV_NAME = "dev:zxclarega"
 
--- UI ядро
+-- UI ����
 local NEVERLOSE = loadstring(game:HttpGet("https://raw.githubusercontent.com/3345-c-a-t-s-u-s/NEVERLOSE-UI-Nightly/main/source.lua"))()
 NEVERLOSE:Theme("original")
 local Window = NEVERLOSE:AddWindow("NEVERLOSE", DEV_NAME)
@@ -67,7 +67,7 @@ local function showHitlog(hitType, info)
     if not HITLOG_ENABLED then return end
     if not hitlogContainer then return end
 
-    -- Скрываем MISS no target
+    -- �������� MISS no target
     if hitType == "Miss" and info and info.reason == "no_target" then
         return
     end
@@ -101,7 +101,7 @@ local function showHitlog(hitType, info)
         elseif reason == "too_far" then
             textLabel.Text = string.format("MISS | TOO FAR | %d studs", tonumber(info.distance) or 0)
         elseif reason == "bad_angle" then
-            textLabel.Text = string.format("MISS | ANGLE | %d°", tonumber(info.angle) or 0)
+            textLabel.Text = string.format("MISS | ANGLE | %d�", tonumber(info.angle) or 0)
         elseif reason == "target_dead" then
             textLabel.Text = "MISS | DEAD"
         elseif reason == "friendly_fire" then
@@ -130,7 +130,7 @@ local function showHitlog(hitType, info)
     end)
 end
 
--- (Подключение к игровым hitlog событиям если есть)
+-- (����������� � ������� hitlog �������� ���� ����)
 task.spawn(function()
     local success, hitlogEvent = pcall(function()
         return ReplicatedStorage:WaitForChild("htl", 10)
@@ -142,7 +142,7 @@ task.spawn(function()
     end
 end)
 
--- Для внутренних логов (Ragebot/ESP) также вызывайте showHitlog("Hit"/"Miss", tablica)
+-- ��� ���������� ����� (Ragebot/ESP) ����� ��������� showHitlog("Hit"/"Miss", tablica)
 ---------------------------------
 -- UNINJECT
 local uninjected = false
@@ -154,7 +154,10 @@ local function FullUninject()
     RageSettings.Enabled = false
     GhostSettings.Enabled = false
     AASettings.Mode = "Off"
+    BunnyHopSettings.Enabled = false
+    if bhopConn then pcall(function() bhopConn:Disconnect() end) bhopConn=nil end
     ClearChams()
+    ClearAllTracers()
     pcall(function() if NEVERLOSE and NEVERLOSE.Destroy then NEVERLOSE:Destroy() end end)
     pcall(function() if Window and Window.Destroy then Window:Destroy() end end)
     if hitlogContainer and hitlogContainer.Parent then hitlogContainer.Parent:Destroy() end
@@ -176,7 +179,7 @@ local RageSettings = {
     MaxDist = 1200,
     BodyAimHP = 35,
 }
-local rage_cooldown = 2.5 -- сек.
+local rage_cooldown = 2.5 -- ���.
 
 local playerData, playerDataTime = {}, 0
 local myChar, myHRP, myHead, myHum, fireShot, fireShotTime = nil, nil, nil, nil, nil, 0
@@ -218,15 +221,21 @@ local function UpdatePlayerData()
 end
 
 local function GetTarget()
-    -- Улучшенная наводка: предикт головы и анти-стук миссов
+    -- ���������� �������: ������� ������ � ����-���� ������
     if #playerData == 0 then return nil end
     local closest, minDist = nil, math.huge
     for _,enemy in ipairs(playerData) do
         if not enemy.isEnemy then continue end
-        local part = enemy.char:FindFirstChild(RageSettings.Hitbox or "Head")
+        local hitboxName = RageSettings.Hitbox or "Head"
+        local part = nil
+        if hitboxName == "Body" then
+            part = enemy.char:FindFirstChild("Torso") or enemy.char:FindFirstChild("HumanoidRootPart")
+        else
+            part = enemy.char:FindFirstChild(hitboxName)
+        end
         if not part then continue end
         if (enemy.dist or 9999) > (RageSettings.MaxDist or 1200) then continue end
-        -- Предикт движения головы врага (ping ~ 0.15)
+        -- ������� �������� ������ ����� (ping ~ 0.15)
         local v = enemy.hrp.AssemblyLinearVelocity or Vector3.new()
         local pred = part.Position + v*0.15
         local canSee = true
@@ -243,7 +252,7 @@ local function GetTarget()
             closest, minDist = {enemy=enemy, pos=pred, part=part}, enemy.dist
         end
     end
-    if closest then return closest.enemy, closest.pos end
+    if closest then return closest.enemy, closest.pos, closest.part end
     return nil
 end
 
@@ -276,19 +285,23 @@ local function MainLoop()
     if RageSettings.AutoFire then
         local now = tick()
         if now - rbLast >= rage_cooldown then
-            local target, shootPos = GetTarget()
-            if target and shootPos then
+            local target, shootPos, targetPart = GetTarget()
+            if target and shootPos and targetPart then
                 local fire = GetFireShot()
                 if fire then
                     local dir = (shootPos - myPos).Unit
                     pcall(function()
-                        fire:FireServer(myPos, dir, target.hrp)
+                        fire:FireServer(myPos, dir, targetPart)
                     end)
+                    -- Create tracer
+                    if VisualSettings.TracersEnabled then
+                        CreateTracer(myPos, shootPos, VisualSettings.TracerColor, VisualSettings.TracerThickness, VisualSettings.TracerDuration)
+                    end
                     rbLast = now
-                    -- Лог попадания (center)
+                    -- ��� ��������� (center)
                     showHitlog("Hit", {
                         bodyPart = RageSettings.Hitbox,
-                        damage = math.random(18,52), -- если можно получить дамаг real — заменить!
+                        damage = math.random(18,52), -- ���� ����� �������� ����� real � ��������!
                         distance = target.dist or 0
                     })
                 end
@@ -309,7 +322,7 @@ local function StopRagebot()
 end
 
 ----------------------------
--- ЧАМСЫ + на себя
+-- ����� + �� ����
 local matOpts = {"Flat","Glossy","Crystal","Glass","Metallic","Wireframe"}
 local chamsTargets = {"None","All Enemies","Allies","Everyone","Just You"}
 local ChamsSettings = {
@@ -377,11 +390,15 @@ Plrs.PlayerAdded:Connect(function() task.wait(1) UpdateChams() end)
 Plrs.PlayerRemoving:Connect(function() task.wait(1) UpdateChams() end)
 
 ------------------
--- ESP (boxes, text, distance, color by team/enemy/self), опция VisualSettings.ESPEnabled
+-- ESP (boxes, text, distance, color by team/enemy/self), ����� VisualSettings.ESPEnabled
 
 local VisualSettings = {
     ESPEnabled = true,
-    HitLogger = false, -- убрали логгер панели, только center hitlog
+    HitLogger = false,
+    TracersEnabled = true,
+    TracerColor = Color3.fromRGB(255, 100, 100),
+    TracerDuration = 0.5,
+    TracerThickness = 1, -- ������ ������ ������, ������ center hitlog
 }
 local ESP_DRAWINGS = {}
 function ClearESP()
@@ -396,7 +413,7 @@ function DrawESP()
         if char and char:FindFirstChild("Head") and char:FindFirstChild("HumanoidRootPart") and char:FindFirstChildOfClass("Humanoid") and char:FindFirstChildOfClass("Humanoid").Health > 2 then
             local hrp = char.HumanoidRootPart
             local head = char.Head
-            -- 2D проекция вью (use Camera:WorldToViewportPoint)
+            -- 2D �������� ��� (use Camera:WorldToViewportPoint)
             local camera = workspace.CurrentCamera
             local pos, onscreen = camera:WorldToViewportPoint(hrp.Position)
             local myTeam = LP.Team
@@ -428,7 +445,76 @@ RS.RenderStepped:Connect(function()
 end)
 
 ------------------
--- GHOST, АНТИАИМ, МЕНЮ (безопасны�� AA)
+-- TRACERS ( )
+local allTracers = {}
+local function CreateTracer(startPos, endPos, color, thickness, duration)
+    if not VisualSettings.TracersEnabled then return end
+    local part1 = Instance.new("Part")
+    part1.Anchored = true
+    part1.CanCollide = false
+    part1.Transparency = 0.3
+    part1.Size = Vector3.new(thickness or 1, thickness or 1, (startPos - endPos).Magnitude)
+    part1.CFrame = CFrame.new((startPos + endPos) / 2, endPos)
+    part1.Color = color or Color3.fromRGB(255, 100, 100)
+    part1.Material = Enum.Material.Neon
+    part1.Parent = WS
+    table.insert(allTracers, part1)
+    task.spawn(function()
+        task.wait(duration or 0.5)
+        if part1 and part1.Parent then
+            for i = 0.3, 1, 0.05 do
+                part1.Transparency = i
+                task.wait()
+            end
+            pcall(function() part1:Destroy() end)
+        end
+    end)
+end
+local function ClearAllTracers()
+    for _,tracer in ipairs(allTracers) do
+        if tracer and tracer.Parent then pcall(function() tracer:Destroy() end) end
+    end
+    allTracers = {}
+end
+
+------------------
+-- BUNNYHOP
+local BunnyHopSettings = {
+    Enabled = false,
+    JumpPower = 1,
+}
+local bhopConn = nil
+local function BunnyHopLoop()
+    if uninjected or not BunnyHopSettings.Enabled then return end
+    local char = LP.Character
+    if char then
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        if hum and hrp then
+            local isOnGround = false
+            local rayParams = RaycastParams.new()
+            rayParams.FilterType = Enum.RaycastFilterType.Exclude
+            rayParams.FilterDescendantsInstances = {char}
+            local rayResult = WS:Raycast(hrp.Position, Vector3.new(0, -3.5, 0), rayParams)
+            isOnGround = rayResult ~= nil
+            if isOnGround and hum.MoveDirection.Magnitude > 0 then
+                hum:ChangeState(Enum.HumanoidStateType.Jumping)
+            end
+        end
+    end
+end
+local function StartBunnyHop()
+    if bhopConn then return end
+    bhopConn = RS.Heartbeat:Connect(BunnyHopLoop)
+    Notification:Notify("success", "BunnyHop", "Enabled!")
+end
+local function StopBunnyHop()
+    if bhopConn then bhopConn:Disconnect() bhopConn=nil end
+    Notification:Notify("warning", "BunnyHop", "Disabled!")
+end
+
+------------------
+-- GHOST, �������, ���� (���������?? AA)
 
 local GhostSettings = {
     Enabled = false,
@@ -482,7 +568,7 @@ local function StopGhostPeek()
     Notification:Notify("warning", "Ghost Peek", "Disabled!")
 end
 
--- Безопасный Fake AA (не телепортирует)
+-- ���������� Fake AA (�� �������������)
 local AASettings = {
     Mode = "Off", FakeYaw = 25, FakePitch = 3
 }
@@ -500,7 +586,7 @@ RS.Heartbeat:Connect(function()
 end)
 
 ------------------
--- МЕНЮ ---------------------
+-- ���� ---------------------
 local RageSection = MainTab:AddSection('Ragebot Settings', "left")
 RageSection:AddToggle('Enable Ragebot', false, function(val)
     RageSettings.Enabled = val
@@ -531,6 +617,16 @@ VisualsSection:AddColorpicker("Chams Color", ChamsSettings.Color, function(val) 
 VisualsSection:AddSlider('Chams Transparency', 0, 1, 0.2, function(val) ChamsSettings.Transparency = val UpdateChams() end)
 VisualsSection:AddToggle("Chams For Self", true, function(val) ChamsSettings.ForSelf = val UpdateChams() end)
 VisualsSection:AddToggle("ESP Enabled", true, function(val) VisualSettings.ESPEnabled=val end)
+VisualsSection:AddToggle("Tracers Enabled", true, function(val) VisualSettings.TracersEnabled=val if not val then ClearAllTracers() end end)
+VisualsSection:AddColorpicker("Tracer Color", VisualSettings.TracerColor, function(val) VisualSettings.TracerColor=val end)
+VisualsSection:AddSlider("Tracer Duration", 0.1, 2, 0.5, function(val) VisualSettings.TracerDuration=val end)
+VisualsSection:AddSlider("Tracer Thickness", 0.5, 5, 1, function(val) VisualSettings.TracerThickness=val end)
+
+local MovementSection = MainTab:AddSection('Movement', "right")
+MovementSection:AddToggle('BunnyHop Enabled', false, function(val)
+    BunnyHopSettings.Enabled = val
+    if val then StartBunnyHop() else StopBunnyHop() end
+end)
 
 local AASection = AntiAimTab:AddSection('AntiAim', 'left')
 AASection:AddDropdown("Mode", {"Off","Safe Fake"}, "Off", function(val) AASettings.Mode=val end)
@@ -538,5 +634,5 @@ AASection:AddSlider("FakeYaw", 0, 60, 25, function(val) AASettings.FakeYaw=val e
 AASection:AddSlider("FakePitch", 0, 10, 3, function(val) AASettings.FakePitch=val end)
 
 CacheChar()
-Notification:Notify("info", "neverlose.lua", "Loaded! (Rage, ESP, Hitlog, Chams, Safe AA, Uninject)")
-print("neverlose.lua (rage improved, center hitlog, esp/chams, ghostpeek, safe aa, menu UX)")
+Notification:Notify("info", "neverlose.lua", "Loaded! (Rage, ESP, Hitlog, Chams, Tracers, BunnyHop, Safe AA, Uninject)")
+print("neverlose.lua (rage improved, center hitlog, esp/chams, tracers, bunnyhop, ghostpeek, safe aa, menu UX)")
